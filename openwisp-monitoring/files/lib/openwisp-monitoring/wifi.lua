@@ -35,6 +35,23 @@ function wifi.parse_hostapd_clients(clients)
   return data
 end
 
+function wifi.parse_iw_station()
+  local iw_station_data = {}
+  local command = io.popen("brctl showmacs br-lan 2> /dev/null")
+  if (command == nil) then
+    return brctl_info
+  end
+  
+  local brctl_data = command:read("*a")
+  for _, line in ipairs(utils.split(brctl_data, "\n")) do
+    if line:sub(1, 7) ~= 'port no' then
+      local port, mac, is_local = line:match(
+        "(%S+)%s+(%S+)%s+(%S+)")
+      table.insert(brctl_info, {port = port, mac = mac, is_local = (is_local == "yes")})
+    end
+  end
+  return brctl_info
+
 function wifi.parse_iwinfo_clients(clients)
   local data = {}
   for _, p in pairs(clients) do

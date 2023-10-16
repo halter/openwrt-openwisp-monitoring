@@ -1,0 +1,1 @@
+elseif arg[2] == 'iwinfo' and arg[3] == 'info' then
