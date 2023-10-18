@@ -41,41 +41,25 @@ local specialized_interfaces = {
           if connection[3] ~= 'No service' then
             local carrier_type = string.lower(connection[3])
             info.connection_status = string.lower(connection[4])
-            info.signal[carrier_type] = {}
 
+            local signal_file = io.popen('gsmctl -q -O ' .. modem)
+            local signal_info = signal_file:read("*a")
+            signal_file:close()
+            signal_info = string.lower(signal_info)
+
+            info.signal[carrier_type] = {}
+            for _, line in ipairs(utils.split(signal_info, "\n")) do
+              local signal_metric = utils.split(line, ":")
+              utils.dict_merge({[signal_metric[1]] = string.gsub(signal_metric[2], "%s+", "")}, info.signal[carrier_type])
+            end
+          else
+            info.connection_status = "no_service"
           end
         end
       end
     else
       info.power_status = "off"
     end
-
-
-    -- local signal_file =
-    --   io.popen('mmcli --output-json -m ' .. modem .. ' --signal-get')
-    -- local signal = signal_file:read("*a")
-    -- signal_file:close()
-    -- if signal and pcall(cjson.decode, signal) then
-    --   signal = cjson.decode(signal)
-    --   -- only send data if not empty to avoid generating too much traffic
-    --   if not utils.is_table_empty(signal.modem) and
-    --     not utils.is_table_empty(signal.modem.signal) then
-    --     -- omit refresh rate
-    --     signal.modem.signal.refresh = nil
-    --     info.signal = {}
-    --     -- collect section and values only if not empty
-    --     for section_key, section_values in pairs(signal.modem.signal) do
-    --       for key, value in pairs(section_values) do
-    --         if value ~= '--' then
-    --           if utils.is_table_empty(info.signal[section_key]) then
-    --             info.signal[section_key] = {}
-    --           end
-    --           info.signal[section_key][key] = tonumber(value)
-    --         end
-    --       end
-    --     end
-    --   end
-    -- end
 
     return {type = 'modem-manager', mobile = info}
   end
