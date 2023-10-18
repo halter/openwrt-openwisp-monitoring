@@ -17,55 +17,65 @@ local interface_data = ubus:call('network.interface', 'dump', {})
 local interfaces = {}
 
 local specialized_interfaces = {
-  modemmanager = function(_, interface)
-    local modem = uci_cursor.get('network', interface['interface'], 'device')
+  wwan = function(_, interface)
+    local modem = uci_cursor.get('network', interface['interface'], 'modem')
     local info = {}
-    local general_file = io.popen('mmcli --output-json -m ' .. modem)
+    local general_file = io.popen('gsmctl -E -O ' .. modem .. " | grep -iv 'Enabled band'")
     local general = general_file:read("*a")
     general_file:close()
     if general and pcall(cjson.decode, general) then
       general = cjson.decode(general)
-      general = general.modem
+      info.manufacturer = general.manuf
+      info.model = general.model
+      info.power_status = "on"
+      info.signal = {}
+      if not utils.is_table_empty(general['cache']) then
+        info.imei = general['cache']['imei']
+        if general['cache']['imsi'] ~= nil then
+          local connection_file = io.popen('gsmctl -oftj -O ' .. modem)
+          local connection = connection_file:read("*a")
+          connection_file:close()
+          connection = utils.split(connection, "\n")
+          info.operator_name = connection[1]
+          info.operator_code = connection[2]
+          if connection[3] ~= 'No service' then
+            local carrier_type = string.lower(connection[3])
+            info.connection_status = string.lower(connection[4])
+            info.signal[carrier_type] = {}
 
-      if not utils.is_table_empty(general['3gpp']) then
-        info.imei = general['3gpp'].imei
-        info.operator_name = general['3gpp']['operator-name']
-        info.operator_code = general['3gpp']['operator-code']
-      end
-
-      if not utils.is_table_empty(general.generic) then
-        info.manufacturer = general.generic.manufacturer
-        info.model = general.generic.model
-        info.connection_status = general.generic.state
-        info.power_status = general.generic['power-state']
-      end
-    end
-
-    local signal_file =
-      io.popen('mmcli --output-json -m ' .. modem .. ' --signal-get')
-    local signal = signal_file:read("*a")
-    signal_file:close()
-    if signal and pcall(cjson.decode, signal) then
-      signal = cjson.decode(signal)
-      -- only send data if not empty to avoid generating too much traffic
-      if not utils.is_table_empty(signal.modem) and
-        not utils.is_table_empty(signal.modem.signal) then
-        -- omit refresh rate
-        signal.modem.signal.refresh = nil
-        info.signal = {}
-        -- collect section and values only if not empty
-        for section_key, section_values in pairs(signal.modem.signal) do
-          for key, value in pairs(section_values) do
-            if value ~= '--' then
-              if utils.is_table_empty(info.signal[section_key]) then
-                info.signal[section_key] = {}
-              end
-              info.signal[section_key][key] = tonumber(value)
-            end
           end
         end
       end
+    else
+      info.power_status = "off"
     end
+
+
+    -- local signal_file =
+    --   io.popen('mmcli --output-json -m ' .. modem .. ' --signal-get')
+    -- local signal = signal_file:read("*a")
+    -- signal_file:close()
+    -- if signal and pcall(cjson.decode, signal) then
+    --   signal = cjson.decode(signal)
+    --   -- only send data if not empty to avoid generating too much traffic
+    --   if not utils.is_table_empty(signal.modem) and
+    --     not utils.is_table_empty(signal.modem.signal) then
+    --     -- omit refresh rate
+    --     signal.modem.signal.refresh = nil
+    --     info.signal = {}
+    --     -- collect section and values only if not empty
+    --     for section_key, section_values in pairs(signal.modem.signal) do
+    --       for key, value in pairs(section_values) do
+    --         if value ~= '--' then
+    --           if utils.is_table_empty(info.signal[section_key]) then
+    --             info.signal[section_key] = {}
+    --           end
+    --           info.signal[section_key][key] = tonumber(value)
+    --         end
+    --       end
+    --     end
+    --   end
+    -- end
 
     return {type = 'modem-manager', mobile = info}
   end
