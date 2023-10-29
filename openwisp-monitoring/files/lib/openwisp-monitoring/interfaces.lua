@@ -17,7 +17,75 @@ local interface_data = ubus:call('network.interface', 'dump', {})
 local interfaces = {}
 
 local specialized_interfaces = {
+  modemmanager = function(_, interface)
+    local modem = uci_cursor.get('network', interface['interface'], 'device')
+    local info = {}
+    local general_file = io.popen('mmcli --output-json -m ' .. modem)
+    local general = general_file:read("*a")
+    general_file:close()
+    if general and pcall(cjson.decode, general) then
+      general = cjson.decode(general)
+      general = general.modem
+
+      if not utils.is_table_empty(general['3gpp']) then
+        info.imei = general['3gpp'].imei
+        info.operator_name = general['3gpp']['operator-name']
+        info.operator_code = general['3gpp']['operator-code']
+      end
+
+      if not utils.is_table_empty(general.generic) then
+        info.manufacturer = general.generic.manufacturer
+        info.model = general.generic.model
+        info.connection_status = general.generic.state
+        info.power_status = general.generic['power-state']
+      end
+    end
+
+    local signal_file =
+      io.popen('mmcli --output-json -m ' .. modem .. ' --signal-get')
+    local signal = signal_file:read("*a")
+    signal_file:close()
+    if signal and pcall(cjson.decode, signal) then
+      signal = cjson.decode(signal)
+      -- only send data if not empty to avoid generating too much traffic
+      if not utils.is_table_empty(signal.modem) and
+        not utils.is_table_empty(signal.modem.signal) then
+        -- omit refresh rate
+        signal.modem.signal.refresh = nil
+        info.signal = {}
+        -- collect section and values only if not empty
+        for section_key, section_values in pairs(signal.modem.signal) do
+          for key, value in pairs(section_values) do
+            if value ~= '--' then
+              if utils.is_table_empty(info.signal[section_key]) then
+                info.signal[section_key] = {}
+              end
+              info.signal[section_key][key] = tonumber(value)
+            end
+          end
+        end
+      end
+    end
+
+    return {type = 'modem-manager', mobile = info}
+  end
   wwan = function(_, interface)
+    local carrier_lookup = {
+      gsm = {
+        conn_type = 'gsm'
+      },
+      wcdma = {
+        conn_type = 'umts'
+      },
+      tdscdma = {
+        conn_type = 'umts'
+      },
+      lte = {
+        conn_type = 'lte',
+        sinr = 'snr'
+      }
+    }
+
     local modem = uci_cursor.get('network', interface['interface'], 'modem')
     local info = {}
     local general_file = io.popen('gsmctl -E -O ' .. modem .. " | grep -iv 'Enabled band'")
@@ -31,15 +99,21 @@ local specialized_interfaces = {
       info.signal = {}
       if not utils.is_table_empty(general['cache']) then
         info.imei = general['cache']['imei']
+        info.temperature = general['cache']['temperature_value']
+
         if general['cache']['imsi'] ~= nil then
+          info.imsi = general['cache']['imsi']
           local connection_file = io.popen('gsmctl -oftj -O ' .. modem)
           local connection = connection_file:read("*a")
           connection_file:close()
           connection = utils.split(connection, "\n")
           info.operator_name = connection[1]
           info.operator_code = connection[2]
+
           if connection[3] ~= 'No service' then
-            local carrier_type = string.lower(connection[3])
+            local access_type = string.lower(connection[3])
+            access_type = carrier_lookup[access_type]['conn_type']
+
             info.connection_status = string.lower(connection[4])
 
             local signal_file = io.popen('gsmctl -q -O ' .. modem)
@@ -47,10 +121,18 @@ local specialized_interfaces = {
             signal_file:close()
             signal_info = string.lower(signal_info)
 
-            info.signal[carrier_type] = {}
+            info.signal[access_type] = {}
             for _, line in ipairs(utils.split(signal_info, "\n")) do
               local signal_metric = utils.split(line, ":")
-              utils.dict_merge({[signal_metric[1]] = string.gsub(signal_metric[2], "%s+", "")}, info.signal[carrier_type])
+              local signal_value = string.gsub(signal_metric[2], "%s+", "")
+              signal_value = tonumber(signal_value)
+
+              if carrier_lookup[access_type][signal_metric[1]] then
+                signal_stat = carrier_lookup[access_type][signal_metric[1]]
+              else
+                signal_stat = signal_metric[1]
+              end
+              utils.dict_merge({[signal_stat] = signal_value}, info.signal[access_type])
             end
           else
             info.connection_status = "no_service"
