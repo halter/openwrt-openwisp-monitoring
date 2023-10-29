@@ -68,7 +68,8 @@ local specialized_interfaces = {
     end
 
     return {type = 'modem-manager', mobile = info}
-  end
+  end,
+
   wwan = function(_, interface)
     local carrier_lookup = {
       gsm = {
