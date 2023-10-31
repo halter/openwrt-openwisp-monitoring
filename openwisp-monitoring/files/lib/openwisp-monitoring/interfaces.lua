@@ -71,6 +71,7 @@ local specialized_interfaces = {
   end,
 
   wwan = function(_, interface)
+    -- Lookup to convert gsmctl output to modemmanager
     local carrier_lookup = {
       gsm = {
         conn_type = 'gsm'
@@ -98,10 +99,11 @@ local specialized_interfaces = {
       info.model = general.model
       info.power_status = "on"
       info.signal = {}
+
       if not utils.is_table_empty(general['cache']) then
         info.imei = general['cache']['imei']
         info.temperature = general['cache']['temperature_value']
-
+        -- Retrieve connection and signal stats only if SIM is readable
         if general['cache']['imsi'] ~= nil then
           info.imsi = general['cache']['imsi']
           local connection_file = io.popen('gsmctl -oftj -O ' .. modem)
