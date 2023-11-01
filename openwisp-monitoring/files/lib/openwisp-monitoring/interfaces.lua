@@ -125,15 +125,17 @@ local specialized_interfaces = {
           if general['cache']['service_mode'] ~= 2 then
             info.connection_status = "connected"
             info.signal = {}
+
+            local operator_file = io.popen('gsmctl -of -O ' .. modem)
+            local operaator = operator_file:read("*a")
+            operator_file:close()
+            operaator = utils.split(operaator, "\n")
+            info.operator_name = operaator[1]
+            info.operator_code = operaator[2]
+
           else
             info.connection_status = "disconnected"
           end
-          local connection_file = io.popen('gsmctl -oftj -O ' .. modem)
-          local connection = connection_file:read("*a")
-          connection_file:close()
-          connection = utils.split(connection, "\n")
-          info.operator_name = connection[1]
-          info.operator_code = connection[2]
 
           if connection[3] ~= 'No service' then
             local access_type = string.lower(connection[3])
