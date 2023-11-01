@@ -14,6 +14,37 @@ local ubus = ubus_lib.connect()
 if not ubus then error('Failed to connect to ubusd') end
 local interface_data = ubus:call('network.interface', 'dump', {})
 
+-- Lookup to convert gsmctl output to modem-manager
+local carrier_lookup = {
+  gsm = {
+    gsm = {
+      rssi = 'rssi_value'
+    }
+  },
+  wcdma = {
+    umts = {
+      rssi = 'rssi_value',
+      rscp = 'rscp_value',
+      ecio = 'ecio_value'
+    }
+  },
+  tdscdma = {
+    umts = {
+      rssi = 'rssi_value',
+      rscp = 'rscp_value',
+      ecio = 'ecio_value'
+    }
+  },
+  lte = {
+    lte = {
+      rssi = 'rssi_value',
+      rsrp = 'rsrp_value',
+      rsrq = 'rsrq_value',
+      snr = 'sinr_value'
+    }
+  }
+}
+
 local interfaces = {}
 
 local specialized_interfaces = {
@@ -69,25 +100,8 @@ local specialized_interfaces = {
 
     return {type = 'modem-manager', mobile = info}
   end,
-
+  -- jank gsmctl convert to modem-manager format
   wwan = function(_, interface)
-    -- Lookup to convert gsmctl output to modemmanager
-    local carrier_lookup = {
-      gsm = {
-        conn_type = 'gsm'
-      },
-      wcdma = {
-        conn_type = 'umts'
-      },
-      tdscdma = {
-        conn_type = 'umts'
-      },
-      lte = {
-        conn_type = 'lte',
-        sinr = 'snr'
-      }
-    }
-
     local modem = uci_cursor.get('network', interface['interface'], 'modem')
     local info = {}
     local general_file = io.popen('gsmctl -E -O ' .. modem .. " | grep -iv 'Enabled band'")
@@ -97,15 +111,23 @@ local specialized_interfaces = {
       general = cjson.decode(general)
       info.manufacturer = general.manuf
       info.model = general.model
-      info.power_status = "on"
-      info.signal = {}
 
       if not utils.is_table_empty(general['cache']) then
         info.imei = general['cache']['imei']
         info.temperature = general['cache']['temperature_value']
+        info.power_status = "on"
+
         -- Retrieve connection and signal stats only if SIM is readable
-        if general['cache']['imsi'] ~= nil then
+        -- pin_state 1 = "OK"
+        if general['cache']['pin_state'] ~= 1 then
           info.imsi = general['cache']['imsi']
+          -- service_mode 2 = "No service"
+          if general['cache']['service_mode'] ~= 2 then
+            info.connection_status = "connected"
+            info.signal = {}
+          else
+            info.connection_status = "disconnected"
+          end
           local connection_file = io.popen('gsmctl -oftj -O ' .. modem)
           local connection = connection_file:read("*a")
           connection_file:close()
@@ -137,13 +159,10 @@ local specialized_interfaces = {
               end
               utils.dict_merge({[signal_stat] = signal_value}, info.signal[access_type])
             end
-          else
-            info.connection_status = "no_service"
           end
-        end
+      else
+        info.power_status = "off"
       end
-    else
-      info.power_status = "off"
     end
 
     return {type = 'modem-manager', mobile = info}
