@@ -15,7 +15,7 @@ if not ubus then error('Failed to connect to ubusd') end
 local interface_data = ubus:call('network.interface', 'dump', {})
 
 -- Lookup to convert gsmctl output to modem-manager
-local carrier_lookup = {
+local access_lookup = {
   gsm = {
     gsm = {
       rssi = 'rssi_value'
@@ -119,7 +119,7 @@ local specialized_interfaces = {
 
         -- Retrieve connection and signal stats only if SIM is readable
         -- pin_state 1 = "OK"
-        if general['cache']['pin_state'] ~= 1 then
+        if general['cache']['pin_state'] == 1 then
           info.imsi = general['cache']['imsi']
           -- service_mode 2 = "No service"
           if general['cache']['service_mode'] ~= 2 then
@@ -133,40 +133,25 @@ local specialized_interfaces = {
             info.operator_name = operaator[1]
             info.operator_code = operaator[2]
 
+            gsmctl_conn_type = string.lower(general['cache']['service_mode_str'])
+            if access_lookup[gsmctl_conn_type] ~= nil then
+              for section_key, section_values in pairs(access_lookup[gsmctl_conn_type]) do
+                for signal_metric, signal_field in pairs(section_values) do
+                  if utils.is_table_empty(info.signal[section_key]) then
+                    info.signal[section_key] = {}
+                  end
+                  info.signal[section_key][signal_metric] = general['cache'][signal_field]
+                end
+              end
+            end
           else
             info.connection_status = "disconnected"
           end
-
-          if connection[3] ~= 'No service' then
-            local access_type = string.lower(connection[3])
-            access_type = carrier_lookup[access_type]['conn_type']
-
-            info.connection_status = string.lower(connection[4])
-
-            local signal_file = io.popen('gsmctl -q -O ' .. modem)
-            local signal_info = signal_file:read("*a")
-            signal_file:close()
-            signal_info = string.lower(signal_info)
-
-            info.signal[access_type] = {}
-            for _, line in ipairs(utils.split(signal_info, "\n")) do
-              local signal_metric = utils.split(line, ":")
-              local signal_value = string.gsub(signal_metric[2], "%s+", "")
-              signal_value = tonumber(signal_value)
-
-              if carrier_lookup[access_type][signal_metric[1]] then
-                signal_stat = carrier_lookup[access_type][signal_metric[1]]
-              else
-                signal_stat = signal_metric[1]
-              end
-              utils.dict_merge({[signal_stat] = signal_value}, info.signal[access_type])
-            end
-          end
+        end
       else
         info.power_status = "off"
       end
     end
-
     return {type = 'modem-manager', mobile = info}
   end
 }
