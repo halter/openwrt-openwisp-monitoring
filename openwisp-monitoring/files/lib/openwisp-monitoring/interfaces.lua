@@ -212,4 +212,16 @@ function interfaces.get_vpn_interfaces()
   return vpn_interfaces
 end
 
+function interfaces.get_gps_position()
+  local gps_position = {}
+  local gps_position_data = ubus:call('gpsd', 'position', {})
+  if gps_position_data == nil then
+    return gps_position
+  end
+  for key, value in pairs(gps_position_data) do
+    gps_position[key] = value
+  end
+  return gps_position
+end
+
 return interfaces
