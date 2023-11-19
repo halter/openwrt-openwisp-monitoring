@@ -57,6 +57,11 @@ if not monitoring.utils.is_table_empty(port_neighbors) then
   netjson.port_neighbors = port_neighbors
 end
 
+local gps_position = monitoring.interfaces.get_gps_position()
+if not monitoring.utils.is_table_empty(gps_position) then
+  netjson.gps_position = gps_position
+end
+
 -- determine the interfaces to monitor
 local arg = {...}
 local traffic_monitored = arg[1]
